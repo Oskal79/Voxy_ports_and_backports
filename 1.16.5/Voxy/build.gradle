@@ -1,0 +1,291 @@
+// Voxy for Minecraft 1.16.5 / Forge -- Embeddium target (Oculus deferred to a later stage).
+//
+// Toolchain notes:
+//  * ForgeGradle 5 is the last line that supports 1.16.5, and it needs Gradle 7.x on JDK 8.
+//  * Mappings are 'official' (Mojmap). ForgeGradle 5 supports that channel for 1.16.5, which
+//    keeps voxy's existing Mojang names. Note 1.16.5's official names predate the 1.17
+//    net.minecraft.world.level restructure, so packages still differ from the 1.21.1 tree.
+//  * Java 8 bytecode is mandatory: Forge 36.x runs on a Java 8 JVM.
+buildscript {
+    // ForgeGradle 5 has no jarJar, so libraries Minecraft 1.16.5 does not ship are shaded into
+// the mod jar. JOML and MixinExtras are load-bearing (the renderer and the mixins need them);
+// the storage backends are what voxy stores LoD data in.
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
+// Pin the libraries Minecraft itself provides to the versions it actually ships. Gradle otherwise
+// resolves them upward transitively -- gson silently became 2.10.1 at compile time while the game
+// runs 2.8.0, so JsonObject#asMap (2.10+) compiled fine and then NoSuchMethodError'd in game.
+// Forcing them means using a too-new API is a compile error instead.
+configurations.all {
+    resolutionStrategy {
+        force 'com.google.code.gson:gson:2.8.0'
+        force 'org.apache.commons:commons-lang3:3.10'
+        force 'com.google.guava:guava:21.0'
+    }
+}
+
+repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+        mavenCentral()
+    }
+    dependencies {
+        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '5.1.+', changing: true
+        classpath 'org.spongepowered:mixingradle:0.7-SNAPSHOT'
+    }
+}
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'org.spongepowered.mixin'
+
+version = '0.2.18-beta'
+group = 'me.cortex.voxy'
+archivesBaseName = 'voxy'
+
+// Compile with a JDK 17 toolchain but emit Java 8 bytecode. Jabel (below) lifts the language
+// level back to 17 while --release 8 keeps the class files at v52, which is what Forge 36.x
+// loads. This is what makes voxy's ~740 `var` sites, switch expressions, text blocks and
+// instanceof patterns portable without touching them. Records are the one thing Jabel cannot
+// do -- they need java.lang.Record at runtime -- so those are converted in the source.
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.16.5'
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            mods { voxy { source sourceSets.main } }
+        }
+    }
+}
+
+mixin {
+    add sourceSets.main, 'voxy.refmap.json'
+}
+
+// ForgeGradle 5 has no jarJar, so libraries Minecraft 1.16.5 does not ship are shaded into
+// the mod jar. JOML and MixinExtras are load-bearing (the renderer and the mixins need them);
+// the storage backends are what voxy stores LoD data in.
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
+// Pin the libraries Minecraft itself provides to the versions it actually ships. Gradle otherwise
+// resolves them upward transitively -- gson silently became 2.10.1 at compile time while the game
+// runs 2.8.0, so JsonObject#asMap (2.10+) compiled fine and then NoSuchMethodError'd in game.
+// Forcing them means using a too-new API is a compile error instead.
+configurations.all {
+    resolutionStrategy {
+        force 'com.google.code.gson:gson:2.8.0'
+        force 'org.apache.commons:commons-lang3:3.10'
+        force 'com.google.guava:guava:21.0'
+    }
+}
+
+repositories {
+    maven { url = 'https://api.modrinth.com/maven' }   // Embeddium
+    maven { url = 'https://jitpack.io' }               // Jabel
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.16.5-36.2.42'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // Jabel lives on JitPack, and the artifact is 'jabel' -- not 'jabel-javac-plugin', which
+    // is what its own README suggests and which 404s. It needs ByteBuddy on the processor
+    // path or it fails in ServiceLoader with a bare NoClassDefFoundError.
+    annotationProcessor 'com.github.bsideup:jabel:1.0.1'
+    compileOnly        'com.github.bsideup:jabel:1.0.1'
+    annotationProcessor 'net.bytebuddy:byte-buddy:1.14.9'
+    annotationProcessor 'net.bytebuddy:byte-buddy-agent:1.14.9'
+
+    // Voxy's storage/compression stack. Versions are pinned to Java 8 compatible releases;
+    // LWJGL is pinned to 3.2.2 because that is what Minecraft 1.16.5 itself ships -- bringing
+    // a different LWJGL alongside it would conflict at runtime.
+    shade 'org.lwjgl:lwjgl-lmdb:3.2.2'
+    shade 'org.lwjgl:lwjgl-zstd:3.2.2'
+    // The bindings alone are not enough: Zstd/MDB's static initialiser loads the native library
+    // off the classpath, and without it the class fails to initialise and every storage job dies
+    // with NoClassDefFoundError. Windows + Linux x64 only (macOS is out of scope for this port).
+    shade 'org.lwjgl:lwjgl-lmdb:3.2.2:natives-linux'
+    shade 'org.lwjgl:lwjgl-lmdb:3.2.2:natives-windows'
+    shade 'org.lwjgl:lwjgl-zstd:3.2.2:natives-linux'
+    shade 'org.lwjgl:lwjgl-zstd:3.2.2:natives-windows'
+    shade 'org.lz4:lz4-java:1.8.0'
+    implementation 'org.rocksdb:rocksdbjni:8.11.4'
+    implementation 'redis.clients:jedis:5.1.0'
+    shade 'org.apache.commons:commons-pool2:2.12.0'
+    shade 'org.tukaani:xz:1.9'
+    // These are referenced unconditionally by voxy's storage backends and its Windows CPU /
+    // taskbar helpers. Minecraft 1.16.5 ships none of them, so without shading a Windows user
+    // (or anyone selecting the RocksDB/Redis backend) gets a NoClassDefFoundError.
+    shade 'net.java.dev.jna:jna:5.13.0'
+    shade 'net.java.dev.jna:jna-platform:5.13.0'
+    shade 'redis.clients:jedis:5.1.0'
+    shade 'org.rocksdb:rocksdbjni:8.11.4'
+    // Distant Horizons import reads DH's sqlite database; without this the importer logs
+    // "Unable to load sqlite JDBC or lzma decompressor" and disables itself.
+    shade 'org.xerial:sqlite-jdbc:3.49.1.0'
+    implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
+    compileOnly    'org.jetbrains:annotations:23.0.0'
+    // Embeddium is the Sodium fork for this line. Its internals are the old Sodium 0.2-era
+    // me.jellysquid.* design, so voxy's Sodium mixins need rewriting against it (stage 2),
+    // but the renderer's non-mixin references resolve against it directly.
+    compileOnly    'maven.modrinth:embeddium:0.3.18+mc1.16.5'
+    compileOnly    files('libs/oculus-mc1.16.5-1.4.8.jar')
+    // Minecraft only started bundling JOML in 1.19.3; 1.16.5 uses its own
+    // net.minecraft.util.math.vector types. Voxy's renderer is written against JOML throughout,
+    // so it has to be supplied and shipped inside the mod jar (see packaging).
+    // 1.10.5 still targets Java 8.
+    shade 'org.joml:joml:1.10.5'
+    // MixinExtras (@WrapOperation etc.) is bundled by newer loaders but not by Forge 36.x,
+    // so it has to be supplied and shipped.
+    shade 'io.github.llamalad7:mixinextras-common:0.3.5'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.3.5'
+    // LWJGL core: ThreadUtils calls into org.lwjgl.system.windows.Kernel32 for thread affinity.
+    // Minecraft supplies this at runtime, so compileOnly and pinned to the version 1.16.5 ships.
+    compileOnly    'org.lwjgl:lwjgl:3.2.2'
+    // 1.16.5 bundles commons-lang3 3.10, which predates the o.a.c.lang3.stream package.
+    compileOnly    'org.apache.commons:commons-lang3:3.12.0'
+    // CpuLayout uses JNA's Win32 topology structs for core/affinity detection.
+    compileOnly    'net.java.dev.jna:jna:5.13.0'
+    compileOnly    'net.java.dev.jna:jna-platform:5.13.0'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // Deliberately NOT options.release = 8: --release resolves against ct.sym, which omits
+    // sun.misc entirely, and voxy's UnsafeUtil needs sun.misc.Unsafe for all its bulk memory
+    // access. -source/-target 8 plus -XDignore.symbol.file gets sun.misc back and still pins
+    // class files to v52; Jabel raises the accepted *language* level on top of that.
+    // The cost is losing ct.sym's API filtering, so a Java 8 API verifier guards against
+    // Java 9+ methods (List.of, VarHandle, ...) slipping through.
+    sourceCompatibility = '8'
+    targetCompatibility = '8'
+    // -Xmaxerrs: javac caps at 100 by default, which hides the true size of a migration batch.
+    options.compilerArgs += ['-XDignore.symbol.file', '-Xmaxerrs', '2000']
+    options.encoding = 'UTF-8'
+    // Jabel runs inside the compiler's own process here, so it does not need the
+    // --add-exports flags a standalone javac invocation requires. Passing them via
+    // forkOptions.jvmArgs also leaks them into ForgeGradle's JDK 8 workers, which reject
+    // them outright with "Unrecognized option" and fail the build.
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'   : 'voxy',
+            'Specification-Vendor'  : 'cortex',
+            'Specification-Version' : '1',
+            'Implementation-Title'  : project.name,
+            'Implementation-Version': project.version,
+            'Implementation-Vendor' : 'cortex',
+            'MixinConfigs'          : 'voxy.mixins.json,voxy-common.mixins.json'
+        ])
+    }
+}
+jar {
+    // Shade the libraries in before reobf runs, so the mod jar is self-contained.
+    // LWJGL's own classes are excluded: Minecraft already provides 3.2.2 on the classpath and
+    // duplicating them would shadow the game's copy.
+    from {
+        configurations.shade.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    // LWJGL's lmdb/zstd artifacts carry multi-release copies of org.lwjgl.system.*; shipping
+    // those would shadow the LWJGL Minecraft itself loads. Only the bindings are wanted.
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'module-info.class'
+    exclude 'META-INF/versions/**'
+    exclude 'org/lwjgl/system/**', 'org/lwjgl/opengl/**', 'org/lwjgl/glfw/**'
+    // rocksdbjni is 65MB because it carries natives for every platform it supports. The port
+    // targets Windows and Linux x64 (macOS is explicitly out of scope), so drop the rest.
+    exclude '**/librocksdbjni-linux-aarch64*', '**/librocksdbjni-linux-ppc64le*',
+            '**/librocksdbjni-linux-riscv64*', '**/librocksdbjni-linux-s390x*',
+            '**/librocksdbjni-linux32*', '**/librocksdbjni-osx*',
+            '**/librocksdbjni-linux64-musl*', '**/librocksdbjni-win32.dll',
+            '**/*.jnilib'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// LWJGL bindings are useless without their native library: Zstd/MDB's static initialiser loads
+// it off the classpath, and a missing .so shows up as NoClassDefFoundError on the *binding class*,
+// which reads like a packaging omission rather than a missing native. Assert both are present.
+// Note 3.2.2 places natives at the jar root, not under a linux/x64/ prefix.
+tasks.register('verifyNatives') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        def names = new java.util.zip.ZipFile(jarFile).entries().collect { it.name } as Set
+        def required = [
+            'liblwjgl_zstd.so', 'lwjgl_zstd.dll',
+            'liblwjgl_lmdb.so', 'lwjgl_lmdb.dll',
+            'librocksdbjni-linux64.so', 'librocksdbjni-win64.dll',
+        ]
+        def missing = required.findAll { !names.contains(it) }
+        if (missing) {
+            throw new GradleException("Native libraries missing from the mod jar: " + missing)
+        }
+        // Shaders are loaded by path at runtime, so a missing asset tree only shows up as
+        // "Shader not found: /assets/voxy/shaders/..." mid-render-system-construction.
+        def shaders = names.findAll { it.startsWith('assets/voxy/shaders/') && !it.endsWith('/') }
+        if (shaders.size() < 40) {
+            throw new GradleException("Expected voxy's shader assets in the jar, found only " + shaders.size())
+        }
+        logger.lifecycle("verifyNatives: OK -- ${required.size()} natives, ${shaders.size()} shader assets present")
+    }
+}
+tasks.named('check') { dependsOn tasks.named('verifyNatives') }
+
+jar.finalizedBy('reobfJar')
+
+// Guards the gap left by not using --release 8 (see the compiler config above): scans the
+// compiled classes for JDK APIs that do not exist on Java 8 and fails the build if any are
+// referenced. It runs under the Gradle JVM, which is the JDK 8 ForgeGradle 5 requires, so
+// "does this member exist" is answered by that JDK's own class library rather than a list.
+// It caught 24 real ones on its first run -- List.of, Thread.onSpinWait, String.isBlank,
+// Files.readString/writeString, Short.compareUnsigned, and ByteBuffer's Java 9 covariant
+// clear/rewind/limit overrides -- every one of which compiled clean and would have thrown
+// NoSuchMethodError in game.
+def verifierSrc = rootProject.file('../.buildenv/scripts/VerifyJava8.java')
+def verifierOut = layout.buildDirectory.dir('java8-verifier')
+
+tasks.register('compileJava8Verifier', JavaCompile) {
+    source = files(verifierSrc)
+    classpath = files()
+    destinationDirectory = verifierOut
+    sourceCompatibility = '8'
+    targetCompatibility = '8'
+    options.encoding = 'UTF-8'
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(8) }
+}
+
+tasks.register('verifyJava8', JavaExec) {
+    dependsOn tasks.named('compileJava8Verifier'), tasks.named('compileJava')
+    classpath = files(verifierOut)
+    mainClass = 'VerifyJava8'
+    args = [ sourceSets.main.output.classesDirs.singleFile.absolutePath ]
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
+}
+
+// Second pass: every non-voxy class the mod references must actually exist on the classpath the
+// game will load. The JDK-only check above cannot see a missing third-party type -- voxy's Logger
+// referenced org.slf4j, absent before 1.17, and that only surfaced as an in-game
+// NoClassDefFoundError.
+tasks.register('verifyRuntimeRefs', JavaExec) {
+    dependsOn tasks.named('compileJava8Verifier'), tasks.named('compileJava')
+    classpath = files(verifierOut)
+    mainClass = 'VerifyJava8'
+    doFirst {
+        args = [ sourceSets.main.output.classesDirs.singleFile.absolutePath,
+                 sourceSets.main.compileClasspath.asPath ]
+    }
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
+}
+
+tasks.named('check') { dependsOn tasks.named('verifyRuntimeRefs') }
+
+tasks.named('check') { dependsOn tasks.named('verifyJava8') }

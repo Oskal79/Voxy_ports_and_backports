@@ -1,0 +1,55 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "All-Rights-Reserved"
+
+[[mods]]
+modId = "voxy"
+version = "${version}"
+displayName = "Voxy"
+logoFile = "assets/voxy/icon.png"
+authors = "Cortex"
+description = '''
+Far distance rendering mod utilising LoDs
+'''
+
+[modproperties.voxy]
+# Fabric kept these under fabric.mod.json's "custom" block; NeoForge exposes
+# modproperties through IModInfo#getModProperties instead.
+commit = "${commit}"
+buildtime = "${buildtime}"
+# Replaces fabric.mod.json's "sodium:config_api_user" entrypoint. Sodium's NeoForge
+# ConfigLoaderForge reads this property to find our ConfigEntryPoint implementation.
+"sodium:config_api_user" = "me.cortex.voxy.client.config.VoxyConfigMenu"
+
+[[mixins]]
+config = "common.voxy.mixins.json"
+
+[[mixins]]
+config = "client.voxy.mixins.json"
+
+# Iris mixins target Iris' own classes, so they must only load when Iris is present.
+# Fabric relied on Mixin silently skipping missing targets; NeoForge lets us gate it properly.
+[[mixins]]
+config = "iris.voxy.mixins.json"
+requiredMods = ["iris"]
+
+[[dependencies.voxy]]
+modId = "neoforge"
+type = "required"
+versionRange = "${neoforge_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.voxy]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.voxy]]
+modId = "sodium"
+type = "required"
+versionRange = "${sodium_version_range}"
+ordering = "AFTER"
+side = "CLIENT"

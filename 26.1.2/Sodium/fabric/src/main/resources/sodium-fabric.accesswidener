@@ -1,0 +1,26 @@
+accessWidener v1 official
+
+accessible class net/minecraft/client/model/geom/ModelPart$Vertex
+accessible class net/minecraft/client/model/geom/ModelPart$Polygon
+accessible class net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture
+accessible class net/minecraft/client/renderer/texture/SpriteContents$FrameInfo
+accessible field net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture interpolateFrames Z
+accessible field net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture frames Ljava/util/List;
+accessible class net/minecraft/world/level/chunk/PalettedContainer$Data
+accessible class net/minecraft/client/renderer/texture/Stitcher$Holder
+accessible class net/minecraft/world/level/biome/Biome$ClimateSettings
+accessible method net/minecraft/client/renderer/SectionBufferBuilderPool <init> (Ljava/util/List;)V
+accessible class net/minecraft/client/gui/font/glyphs/BakedSheetGlyph$EffectInstance
+accessible field com/mojang/blaze3d/vertex/PoseStack$Pose trustedNormals Z
+accessible class net/minecraft/client/renderer/CloudRenderer$RelativeCameraPos
+accessible class com/mojang/blaze3d/opengl/GlDevice
+
+accessible field net/minecraft/world/level/GrassColor pixels [I
+accessible field net/minecraft/world/level/FoliageColor pixels [I
+
+accessible field net/minecraft/client/resources/model/cuboid/ItemModelGenerator MIN_Z F
+accessible field net/minecraft/client/resources/model/cuboid/ItemModelGenerator MAX_Z F
+accessible field net/minecraft/client/resources/model/cuboid/ItemModelGenerator UV_SHRINK F
+accessible method net/minecraft/client/resources/model/cuboid/ItemModelGenerator isTransparent (Lnet/minecraft/client/renderer/texture/SpriteContents;IIIII)Z
+accessible class net/minecraft/client/resources/model/cuboid/ItemModelGenerator$SideDirection
+accessible method net/minecraft/client/resources/model/cuboid/ItemModelGenerator$SideDirection isHorizontal ()Z

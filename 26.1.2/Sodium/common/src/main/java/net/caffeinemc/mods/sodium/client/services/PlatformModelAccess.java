@@ -1,0 +1,58 @@
+package net.caffeinemc.mods.sodium.client.services;
+
+import net.caffeinemc.mods.sodium.client.model.color.ColorProvider;
+import net.caffeinemc.mods.sodium.client.render.helper.ListStorage;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.ApiStatus;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+
+public interface PlatformModelAccess {
+    PlatformModelAccess INSTANCE = Services.load(PlatformModelAccess.class);
+
+    static PlatformModelAccess getInstance() {
+        return INSTANCE;
+    }
+
+    /**
+     * Returns a list of quads used by this model.
+     * @param level The level slice.
+     * @param pos The position of the block being rendered.
+     * @param model The {@code BakedModel} currently being drawn.
+     * @param state The block state of the current block.
+     * @param face The current face of the block being rendered, or null if rendering unassigned quads.
+     * @param random The random source used by the current block renderer.
+     * @return The list of quads used by the model.
+     */
+    List<BakedQuad> getQuads(BlockAndTintGetter level, BlockPos pos, BlockStateModelPart model, BlockState state, Direction face, RandomSource random);
+
+    /**
+     * Gets the container holding model data for this chunk. <b>This operation is not thread safe.</b>
+     * @param level The current vanilla Level.
+     * @param sectionPos The current chunk position.
+     * @return The model data container for this section
+     */
+    SodiumModelDataContainer getModelDataContainer(Level level, SectionPos sectionPos);
+
+    /**
+     * Should not use. <b>Use {@code SodiumModelData.EMPTY} instead.</b>
+     * @return The empty model data for this platform.
+     */
+    @ApiStatus.Internal
+    SodiumModelData getEmptyModelData();
+
+    List<BlockStateModelPart> collectPartsOf(BlockStateModel blockStateModel, BlockAndTintGetter blockView, BlockPos pos, BlockState state, RandomSource random, @Nullable ListStorage emitter);
+
+    @Nullable
+    ColorProvider<BlockState> createMutableColorProvider();
+}

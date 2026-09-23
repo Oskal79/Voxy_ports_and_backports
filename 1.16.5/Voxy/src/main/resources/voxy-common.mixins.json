@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "me.cortex.voxy.commonImpl.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "voxy.refmap.json",
+  "mixins": [
+    "minecraft.MixinWorld"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "minVersion": "0.8"
+}

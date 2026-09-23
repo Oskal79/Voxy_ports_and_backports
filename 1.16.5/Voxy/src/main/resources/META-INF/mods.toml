@@ -1,0 +1,34 @@
+modLoader="javafml"
+loaderVersion="[36,)"
+license="LGPL-3.0"
+issueTrackerURL="https://github.com/CortexPE/voxy/issues"
+
+[[mods]]
+modId="voxy"
+version="${file.jarVersion}"
+displayName="Voxy"
+description='''
+Level-of-detail terrain renderer. 1.16.5 / Forge port, built against Embeddium.
+'''
+
+[[dependencies.voxy]]
+    modId="forge"
+    mandatory=true
+    versionRange="[36,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.voxy]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.16.5,1.17)"
+    ordering="NONE"
+    side="BOTH"
+
+# Embeddium supplies the chunk renderer voxy hooks into.
+[[dependencies.voxy]]
+    modId="embeddium"
+    mandatory=true
+    versionRange="[0.3,)"
+    ordering="AFTER"
+    side="CLIENT"

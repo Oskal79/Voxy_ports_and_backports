@@ -1,0 +1,356 @@
+plugins {
+    id 'net.neoforged.moddev' version "${moddev_version}"
+    id 'maven-publish'
+}
+
+def isInGHA = System.getenv("GITHUB_ACTIONS") == "true"
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+
+    maven { url = "https://maven.neoforged.net/releases/" }
+    maven { url = "https://maven.caffeinemc.net/releases" }
+    mavenCentral()
+}
+
+def gitCommitHash = { ->
+    try {
+        def result = providers.exec {
+            commandLine = ['git', 'rev-parse', 'HEAD']
+            ignoreExitValue = true
+        }
+        if (result.getResult().get().getExitValue() != 0) {
+            return "<UnknownCommit>"
+        }
+        return result.standardOutput.asText.get().strip()
+    } catch (Exception ignored) {
+        return "<UnknownCommit>"
+    }
+}
+
+def buildtime = { System.currentTimeSeconds() }
+
+// ---------------------------------------------------------------------------
+// NeoForge
+// ---------------------------------------------------------------------------
+neoForge {
+    version = project.neoforge_version
+
+    // Ported from the Fabric build's voxy.accesswidener
+    accessTransformers.from(file("src/main/resources/META-INF/accesstransformer.cfg"))
+    validateAccessTransformers = true
+
+    parchment {
+        // no parchment mappings - voxy is written against official names
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = file("run")
+        }
+    }
+
+    mods {
+        voxy {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sodium is NOT built here -- we compile against the official NeoForge release you already run.
+// Sodium ships as a thin service jar with the real mod classes nested under META-INF/jarjar, so the
+// nested "-mod" jar is what carries the classes voxy compiles and mixes into. `extractSodium`
+// pulls it out of the release jar in .buildenv/ref-sodium/.
+// ---------------------------------------------------------------------------
+def sodiumReleaseJar = rootProject.file("../.buildenv/ref-sodium/sodium-${project.sodium_version}.jar")
+def sodiumModJar = layout.buildDirectory.file("sodium-ref/sodium-${project.sodium_version}-mod.jar")
+
+def extractSodium = tasks.register("extractSodium") {
+    inputs.file(sodiumReleaseJar)
+    outputs.file(sodiumModJar)
+    doLast {
+        def outFile = sodiumModJar.get().asFile
+        outFile.parentFile.mkdirs()
+        def zf = new java.util.zip.ZipFile(sodiumReleaseJar)
+        try {
+            def entry = zf.entries().findAll {
+                it.name.startsWith("META-INF/jarjar/") && it.name.endsWith(".jar")
+            }.find { it.name.contains("sodium") }
+            if (entry == null) {
+                throw new GradleException("No nested sodium mod jar inside ${sodiumReleaseJar}")
+            }
+            outFile.withOutputStream { os -> zf.getInputStream(entry).withStream { is -> os << is } }
+            logger.lifecycle("Compiling against ${entry.name}")
+        } finally {
+            zf.close()
+        }
+    }
+}
+
+dependencies {
+    if (!sodiumReleaseJar.exists()) {
+        throw new GradleException("Missing ${sodiumReleaseJar}. Download the official Sodium " +
+                "${project.sodium_version} NeoForge jar there (see README).")
+    }
+    compileOnly files(sodiumModJar) { builtBy extractSodium }
+
+    compileOnly "maven.modrinth:iris:${project.iris_version}"
+    // Voxy reads Lithium's palette type and Vivecraft's VR render-pass API directly, so both are
+    // needed on the compile classpath. Both ship real NeoForge builds; at runtime they stay optional
+    // (guarded by VoxyPlatform.isModLoaded).
+    compileOnly "maven.modrinth:lithium:${project.lithium_version}"
+    compileOnly "maven.modrinth:vivecraft:${project.vivecraft_version}"
+
+    // --- embedded libraries (Fabric `include(...)` -> NeoForge JarJar) ---
+    jarJar(implementation("org.lwjgl:lwjgl-lmdb")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+    jarJar(implementation("org.lwjgl:lwjgl-zstd")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+    jarJar(implementation("redis.clients:jedis")) {
+        version { strictly "[5.1.0,5.2)"; prefer "5.1.0" }
+    }
+    jarJar(implementation("org.rocksdb:rocksdbjni")) {
+        version { strictly "[10.2.1,10.3)"; prefer "10.2.1" }
+    }
+    jarJar(implementation("org.apache.commons:commons-pool2")) {
+        version { strictly "[2.12.0,2.13)"; prefer "2.12.0" }
+    }
+    // NOT embedded on 1.21.1: Minecraft already ships org.lz4:lz4-java:1.8.0 as a game library.
+    // Bundling a second copy puts two modules named "org.lz4.java" in the boot layer, which fails
+    // with "Module yabn reads more than one module named org.lz4.java". (26.x dropped lz4 from the
+    // game libraries, which is why the 26.1.2 build does embed it.)
+    compileOnly "org.lz4:lz4-java:1.8.0"
+    jarJar(implementation("org.tukaani:xz")) {
+        version { strictly "[1.10,1.11)"; prefer "1.10" }
+    }
+
+    // LWJGL core comes from Minecraft itself; we only need the extra modules' natives.
+    // Windows + Linux x64 only (macOS is deliberately unsupported by this port).
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-lmdb:${project.lwjgl_version}:natives-windows")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-lmdb:${project.lwjgl_version}:natives-linux")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-zstd:${project.lwjgl_version}:natives-windows")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+    jarJar(runtimeOnly("org.lwjgl:lwjgl-zstd:${project.lwjgl_version}:natives-linux")) {
+        version { strictly project.lwjgl_version_range; prefer project.lwjgl_version }
+    }
+
+    // Distant Horizons importer. Embedded (natives trimmed below) so /voxy import distant_horizons
+    // works standalone -- released Fabric builds log "Unable to load sqlite JDBC" without it.
+    jarJar(implementation("org.xerial:sqlite-jdbc")) {
+        version { strictly "[3.49.1.0,3.50)"; prefer "3.49.1.0" }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// rocksdbjni ships ~190 MB of natives covering every platform it supports. This port targets
+// Windows x64 + Linux x64 only (macOS is deliberately out of scope), so the rest is stripped back
+// out of the jar-in-jar copy -- the same filter the Fabric build applied via `makeExcludedRocksDB`.
+// The trimmed jar keeps the original filename so JarJar's metadata.json still resolves it.
+// ---------------------------------------------------------------------------
+configurations.create("rocksdbFull") { transitive = false }
+configurations.create("sqliteFull") { transitive = false }
+
+dependencies {
+    rocksdbFull "org.rocksdb:rocksdbjni:10.2.1"
+    sqliteFull "org.xerial:sqlite-jdbc:3.49.1.0"
+}
+
+def trimRocksDB = tasks.register("trimRocksDB", Zip) {
+    dependsOn tasks.named("jarJar")
+
+    def src = configurations.named("rocksdbFull")
+    inputs.files(src)
+
+    archiveExtension = "jar"
+    archiveFileName = providers.provider { src.get().singleFile.name }
+    // Overwrite the fat copy JarJar staged, in place, before `jar` packages that directory.
+    destinationDirectory = layout.buildDirectory.dir("generated/jarJar/META-INF/jarjar")
+
+    from { zipTree(src.get().singleFile) }
+
+    exclude {
+        def name = it.name
+        if (name.endsWith(".jnilib")) {
+            return true        // macOS
+        }
+        if (!name.endsWith(".so")) {
+            return false       // keep librocksdbjni-win64.dll and all the class files
+        }
+        return ["osx", "linux32", "musl", "s390x", "riscv64", "ppc64le", "aarch64"].any { name.contains(it) }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// LWJGL's lmdb/zstd jars are multi-release and carry META-INF/versions/9/module-info.class:
+//   org.lwjgl.lmdb.natives  requires transitive org.lwjgl.lmdb
+//   org.lwjgl.lmdb          requires transitive org.lwjgl        <- LWJGL core
+// On NeoForge 21.1 Minecraft's LWJGL core sits on the classpath rather than the module path, so
+// org.lwjgl is not a resolvable module and the whole chain fails the boot module layer with
+//   FindException: Module org.lwjgl.lmdb not found, required by org.lwjgl.lmdb.natives
+// On top of that, the windows and linux natives jars declare the *same* module name, which is a
+// duplicate in a single layer.
+// Dropping the module descriptors turns them into automatic modules that require nothing; the
+// classes and the native payloads are untouched, and LWJGL's SharedLibraryLoader finds the natives
+// on the classpath exactly as before.
+// ---------------------------------------------------------------------------
+def stripLwjglModuleInfo = tasks.register("stripLwjglModuleInfo") {
+    dependsOn tasks.named("jarJar")
+    def staging = layout.buildDirectory.dir("generated/jarJar/META-INF/jarjar")
+    outputs.upToDateWhen { false }
+    doLast {
+        def dir = staging.get().asFile
+        def jars = dir.listFiles()?.findAll { it.name.startsWith("lwjgl-") && it.name.endsWith(".jar") } ?: []
+
+        // Collect the native payloads, keyed by the library they belong to ("lmdb", "zstd").
+        def nativesByLib = [:].withDefault { [:] }
+        jars.findAll { it.name.contains("-natives-") }.each { jar ->
+            def lib = (it = jar.name =~ /^lwjgl-([a-z]+)-/) ? it[0][1] : null
+            if (lib == null) return
+            new java.util.zip.ZipFile(jar).withCloseable { zin ->
+                zin.entries().each { e ->
+                    if (!e.isDirectory() && !e.name.endsWith("module-info.class") && !e.name.startsWith("META-INF/")) {
+                        nativesByLib[lib][e.name] = zin.getInputStream(e).bytes
+                    }
+                }
+            }
+        }
+
+        jars.each { jar ->
+            def isNatives = jar.name.contains("-natives-")
+            def lib = (it = jar.name =~ /^lwjgl-([a-z]+)-/) ? it[0][1] : null
+            def extra = (!isNatives && lib != null) ? nativesByLib[lib] : [:]
+
+            def tmp = new File(jar.parentFile, jar.name + ".tmp")
+            def seen = [] as Set
+            new java.util.zip.ZipFile(jar).withCloseable { zin ->
+                new java.util.zip.ZipOutputStream(tmp.newOutputStream()).withCloseable { zout ->
+                    zin.entries().each { e ->
+                        // Drop the module descriptors: org.lwjgl.<lib>.natives requires
+                        // org.lwjgl.<lib> requires org.lwjgl, and LWJGL core lives in a different
+                        // module layer on NeoForge 21.1, so the boot layer fails to resolve.
+                        if (e.name.endsWith("module-info.class")) return
+                        if (!seen.add(e.name)) return
+                        zout.putNextEntry(new java.util.zip.ZipEntry(e.name))
+                        if (!e.isDirectory()) zout << zin.getInputStream(e)
+                        zout.closeEntry()
+                    }
+                    // Without module-info the "opens <os>.<arch>.org.lwjgl.<lib>" directive is gone,
+                    // and LWJGL can no longer find the .so/.dll across the split natives module
+                    // ("Failed to locate library: liblwjgl_zstd.so"). Copying the payloads into the
+                    // library's own jar keeps the lookup inside a single module.
+                    extra.each { name, bytes ->
+                        if (!seen.add(name)) return
+                        zout.putNextEntry(new java.util.zip.ZipEntry(name))
+                        zout.write(bytes)
+                        zout.closeEntry()
+                    }
+                }
+            }
+            if (!jar.delete() || !tmp.renameTo(jar)) {
+                throw new GradleException("Could not rewrite ${jar.name}")
+            }
+            if (extra) logger.lifecycle("merged ${extra.size()} native(s) into ${jar.name}")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resource expansion (was fabric.mod.json, now neoforge.mods.toml)
+// ---------------------------------------------------------------------------
+processResources {
+    def props = [
+            "version"             : project.version,
+            "commit"              : gitCommitHash(),
+            "buildtime"           : buildtime(),
+            "sodium_version_range"   : project.sodium_version_range,
+            "minecraft_version_range": project.minecraft_version_range,
+            "neoforge_version_range" : project.neoforge_version_range
+    ]
+    inputs.properties(props)
+
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand(props)
+    }
+}
+
+def targetJavaVersion = Integer.parseInt(project.java_version)
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = targetJavaVersion
+    it.options.deprecation = true
+    it.options.compilerArgs << "-Xmaxerrs" << "2000"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+}
+
+// sqlite-jdbc ships ~24 MB of natives for 55 platform/arch combinations; keep only the two we
+// support. Paths look like org/sqlite/native/<OS>/<arch>/...
+def trimSqlite = tasks.register("trimSqlite", Zip) {
+    dependsOn tasks.named("jarJar")
+
+    def src = configurations.named("sqliteFull")
+    inputs.files(src)
+
+    archiveExtension = "jar"
+    archiveFileName = providers.provider { src.get().singleFile.name }
+    destinationDirectory = layout.buildDirectory.dir("generated/jarJar/META-INF/jarjar")
+
+    from { zipTree(src.get().singleFile) }
+
+    eachFile { fcd ->
+        def path = fcd.relativePath.pathString
+        if (path.startsWith("org/sqlite/native/")
+                && !path.startsWith("org/sqlite/native/Windows/x86_64/")
+                && !path.startsWith("org/sqlite/native/Linux/x86_64/")) {
+            fcd.exclude()
+        }
+    }
+}
+
+jar {
+    dependsOn trimRocksDB, trimSqlite, stripLwjglModuleInfo
+
+    from("LICENSE") {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+
+    manifest {
+        attributes([
+                "Specification-Title"   : "voxy",
+                "Specification-Vendor"  : "Cortex",
+                "Specification-Version" : "1",
+                "Implementation-Title"  : project.name,
+                "Implementation-Version": project.version,
+                "Implementation-Vendor" : "Cortex"
+        ])
+    }
+}
