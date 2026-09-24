@@ -7,7 +7,7 @@
 > **Please do not request support from Cortex or upstream Voxy developers for these builds.**  
 > If you encounter any bugs, crashes, or issues, please report them directly in this repository's **[Issues](https://github.com/Oskal79/Voxy_ports_and_backports/issues)**.
 
-# **SOURCE CODE IS IN VERSIONED FOLDERS AND NAMED $\color{red}{\textbf{Voxy!}}$**
+# **SOURCE CODE IS IN VERSION FOLDERS AND NAMED $\color{red}{\textbf{Voxy!}}$**
 
 ---
 
